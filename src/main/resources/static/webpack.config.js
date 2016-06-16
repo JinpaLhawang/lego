@@ -5,6 +5,11 @@ module.exports = {
   devtool: 'sourcemaps',
   cache: true,
   debug: true,
+  resolve: {
+    alias: {
+      'stompjs': __dirname + '/node_modules/stompjs/lib/stomp.js',
+    }
+  },
   output: {
     path: __dirname,
     filename: './built/bundle.js'

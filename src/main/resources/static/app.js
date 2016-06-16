@@ -1,9 +1,12 @@
 'use strict';
 
 const React = require('react');
+const when = require('when');
 const client = require('./client');
 
 const follow = require('./follow');
+
+const stompClient = require('./websocket-listener');
 
 const root = '/api';
 
@@ -11,11 +14,13 @@ class App extends React.Component {
 
   constructor(props) {
     super(props);
-    this.state = { bricks: [], attributes: [], pageSize: 2, links: {} };
+    this.state = { bricks: [], attributes: [], page: 1, pageSize: 10, links: {} };
     this.updatePageSize = this.updatePageSize.bind(this);
     this.onNavigate = this.onNavigate.bind(this);
     this.onCreate = this.onCreate.bind(this);
     this.onDelete = this.onDelete.bind(this);
+    this.refreshCurrentPage = this.refreshCurrentPage.bind(this);
+    this.refreshAndGoToLastPage = this.refreshAndGoToLastPage.bind(this);
   }
 
   loadFromServer(pageSize) {
@@ -58,31 +63,74 @@ class App extends React.Component {
 
   onCreate(newBrick) {
     let relArray = [ 'bricks' ];
-    follow(client, root, relArray).then(brickCollection => {
+    follow(client, root, relArray).done(response => {
       return client({
         method: 'POST',
-        path: brickCollection.entity._links.self.href,
+        path: response.entity._links.self.href,
         entity: newBrick,
         headers: { 'Content-Type': 'application/json' }
       })
-    }).then(response => {
-      let relArray = [ { rel: 'bricks', params: { size: this.state.pageSize } } ]
-      return follow(client, root, relArray);
-    }).done(response => {
-      this.onNavigate(response.entity._links.last.href);
     });
   }
 
   onDelete(brick) {
-    client({ method: 'DELETE', path: brick._links.self.href }).done(response => {
-      this.loadFromServer(this.state.pageSize);
+    console.log('NICHOLAS onDelete brick:', brick);
+    client({ method: 'DELETE', path: brick._links.self.href });
+  }
+
+  refreshAndGoToLastPage(message) {
+    let relArray = [ { rel: 'bricks', params: { size: this.state.pageSize } } ];
+    follow(client, root, relArray).done(response => {
+      if (response.entity._links.last !== undefined) {
+        this.onNavigate(response.entity._links.last.href);
+      } else {
+        this.onNavigate(response.entity._links.self.href);
+      }
     });
   }
 
-  componentDidMount() {
-    this.loadFromServer(this.state.pageSize);
+  // TODO: DRY loadFromServer and refreshCurrentPage
+  refreshCurrentPage(message) {
+    let relArray = [
+      {
+        rel: 'bricks',
+        params: {
+          size: this.state.pageSize,
+          page: this.state.page.number
+        }
+      }
+    ];
+    follow(client, root, relArray).then(brickCollection => {
+      return client({
+        method: 'GET',
+        path: brickCollection.entity._links.profile.href,
+        headers: { 'Accept': 'application/schema+json' }
+      }).then(schema => {
+        this.schema = schema.entity;
+        return brickCollection;
+      });
+    }).done(brickCollection => {
+      this.setState({
+        page: brickCollection.entity.page,
+        bricks: brickCollection.entity._embedded.bricks,
+        attributes: Object.keys(this.schema.properties),
+        pageSize: this.state.pageSize,
+        links: brickCollection.entity._links
+      });
+    });
   }
 
+  // TODO: Implement Update
+  componentDidMount() {
+    this.loadFromServer(this.state.pageSize);
+    stompClient.register([
+      { route: '/topic/newBrick', callback: this.refreshAndGoToLastPage },
+      { route: '/topic/updateBrick', callback: this.refreshCurrentPage },
+      { route: '/topic/deleteBrick', callback: this.refreshCurrentPage }
+    ]);
+  }
+
+  // TODO: Can order attributes?
   render() {
     return (
       <div>
