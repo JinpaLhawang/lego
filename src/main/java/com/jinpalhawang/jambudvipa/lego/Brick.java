@@ -13,7 +13,7 @@ public class Brick {
   private String color;
   private String elementId;
 
-  public Brick() {}
+  private @SuppressWarnings("unused") Brick() {}
 
   public Brick(String name, String category, String color, String elementId) {
     this.name = name;
